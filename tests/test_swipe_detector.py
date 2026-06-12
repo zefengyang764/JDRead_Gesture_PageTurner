@@ -1,6 +1,11 @@
+from types import SimpleNamespace
 import unittest
 
-from main import SwipeDetector, calculate_swipe_threshold
+from main import (
+    SwipeDetector,
+    calculate_hand_position_x,
+    calculate_swipe_threshold,
+)
 
 
 class SwipeDetectorTests(unittest.TestCase):
@@ -8,9 +13,9 @@ class SwipeDetectorTests(unittest.TestCase):
         return SwipeDetector(
             threshold_pixels=50,
             cooldown_seconds=1.0,
-            history_seconds=1.0,
-            hand_loss_grace_seconds=0.25,
-            min_samples=4,
+            history_seconds=1.2,
+            hand_loss_grace_seconds=0.35,
+            min_samples=3,
         )
 
     def test_left_wave_requests_next_page(self):
@@ -93,9 +98,69 @@ class SwipeDetectorTests(unittest.TestCase):
         self.assertTrue(all(result is None for result in return_results))
 
     def test_threshold_scales_for_camera_width(self):
-        self.assertEqual(calculate_swipe_threshold(320), 45)
-        self.assertEqual(calculate_swipe_threshold(640), 51)
-        self.assertEqual(calculate_swipe_threshold(1920), 80)
+        self.assertEqual(calculate_swipe_threshold(320), 32)
+        self.assertEqual(calculate_swipe_threshold(640), 35)
+        self.assertEqual(calculate_swipe_threshold(1920), 60)
+
+    def test_gesture_can_start_after_initial_tracking_jitter(self):
+        detector = self.make_detector()
+
+        results = [
+            detector.update(x, timestamp)
+            for timestamp, x in (
+                (0.00, 300),
+                (0.06, 307),
+                (0.12, 304),
+                (0.18, 285),
+                (0.24, 260),
+                (0.30, 245),
+            )
+        ]
+
+        self.assertEqual(results[-1], "right")
+
+    def test_slow_drift_does_not_trigger(self):
+        detector = self.make_detector()
+
+        results = [
+            detector.update(x, timestamp)
+            for timestamp, x in (
+                (0.00, 320),
+                (0.30, 302),
+                (0.60, 284),
+                (0.90, 266),
+                (1.15, 248),
+            )
+        ]
+
+        self.assertTrue(all(result is None for result in results))
+
+    def test_direction_reversal_does_not_trigger(self):
+        detector = self.make_detector()
+
+        results = [
+            detector.update(x, timestamp)
+            for timestamp, x in (
+                (0.00, 300),
+                (0.08, 270),
+                (0.16, 305),
+                (0.24, 265),
+                (0.32, 300),
+            )
+        ]
+
+        self.assertTrue(all(result is None for result in results))
+
+    def test_hand_position_blends_wrist_and_palm_base(self):
+        x_values = [0.0] * 21
+        x_values[0] = 0.40
+        for index in (5, 9, 13, 17):
+            x_values[index] = 0.50
+        landmarks = SimpleNamespace(
+            landmark=[SimpleNamespace(x=value) for value in x_values]
+        )
+
+        self.assertEqual(calculate_hand_position_x(landmarks, 640), 288)
 
 
 if __name__ == "__main__":
